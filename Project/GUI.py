@@ -7,31 +7,42 @@ import pickle
 import os
 from tensorflow.keras.models import load_model
 
-# --- PATH CONFIGURATION ---
-# We removed the Windows check to fix your indentation error.
-# On Streamlit Cloud (Linux), Tesseract is found automatically.
+# --- PAGE CONFIGURATION ---
+st.set_page_config(
+    page_title="Prescription Digitizer",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Title of the app
-st.title("Handwritten Prescription to Structured Medicine List")
+# --- CSS STYLING ---
+st.markdown("""
+    <style>
+    .main {
+        background-color: #f5f5f5;
+    }
+    .stButton>button {
+        width: 100%;
+    }
+    .block-container {
+        padding-top: 2rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- DYNAMIC PATH LOADING (Crucial for Cloud) ---
-# Get the folder where THIS file (GUI.py) is located
+# --- DYNAMIC PATH LOADING ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Construct paths to your files dynamically
 model_path = os.path.join(current_dir, "model.h5")
 encoder_path = os.path.join(current_dir, "label_encoder.pkl")
 csv_path = os.path.join(current_dir, "disease_data.csv")
 
-# Load pre-trained model and label encoder
+# --- LOAD RESOURCES ---
 @st.cache_resource
 def load_model_and_encoder():
-    # Check if files exist to prevent crashing
     if not os.path.exists(model_path):
-        st.error(f"Model file not found at: {model_path}")
+        st.error(f"Error: Model file missing at {model_path}")
         return None, None
     if not os.path.exists(encoder_path):
-        st.error(f"Encoder file not found at: {encoder_path}")
+        st.error(f"Error: Encoder file missing at {encoder_path}")
         return None, None
         
     try:
@@ -43,55 +54,68 @@ def load_model_and_encoder():
         st.error(f"Error loading model: {e}")
         return None, None
 
-model, label_encoder = load_model_and_encoder()
-
-# Load disease-medicine dataset from CSV
 @st.cache_data
 def load_disease_data():
     if not os.path.exists(csv_path):
-        st.error(f"CSV file not found at: {csv_path}")
-        return pd.DataFrame() # Return empty dataframe if missing
+        st.error(f"Error: CSV file missing at {csv_path}")
+        return pd.DataFrame()
     return pd.read_csv(csv_path)
 
+# Load everything once
+model, label_encoder = load_model_and_encoder()
 disease_data = load_disease_data()
 
-# Extract text from image using OCR
+# --- HELPER FUNCTIONS ---
+
+def preprocess_image_for_ocr(image):
+    """
+    Applies thresholding to make handwriting stand out against the background.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # Apply Gaussian Blur to reduce noise
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    # Adaptive thresholding is usually better for handwriting
+    thresh = cv2.adaptiveThreshold(
+        blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
+    return thresh
+
 def extract_text_from_image(image):
     try:
-        # Convert image to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # Extract text using Tesseract
-        text = pytesseract.image_to_string(gray)
+        # Preprocess image for better OCR accuracy
+        processed_img = preprocess_image_for_ocr(image)
+        # Configure Tesseract to treat the image as a single block of text
+        custom_config = r'--oem 3 --psm 6'
+        text = pytesseract.image_to_string(processed_img, config=custom_config)
         return text
     except Exception as e:
         return f"OCR Error: {e}"
 
-# Predict disease or medicine using the trained ML model
 def predict_disease(image):
     if model is None or label_encoder is None:
         return "Model Error"
-        
     try:
-        image = cv2.resize(image, (128, 128))                 # Resize for model input
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)       # Convert to grayscale
-        feature = np.mean(gray)                              # Use mean pixel value as feature
-        input_data = np.array([[feature]], dtype=np.float32) # Model expects 2D input
-        prediction = model.predict(input_data)               # Get prediction
-        predicted_class = label_encoder.inverse_transform([np.argmax(prediction)])
+        # Preprocessing for the CNN Model (Must match training logic)
+        resized = cv2.resize(image, (128, 128))
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        feature = np.mean(gray) # Using mean pixel intensity as feature
+        input_data = np.array([[feature]], dtype=np.float32)
+        
+        prediction = model.predict(input_data)
+        predicted_idx = np.argmax(prediction)
+        predicted_class = label_encoder.inverse_transform([predicted_idx])
         return predicted_class[0]
     except Exception as e:
         return f"Prediction Error: {e}"
 
-# If predicted output is a medicine, reverse-map it to corresponding disease
 def reverse_medicine_to_disease(medicine_name, df):
     if df.empty: return None
-    # flexible matching
+    # Flexible string matching (case insensitive)
     filtered = df[df['medicine'].str.lower() == str(medicine_name).lower()]
     if filtered.empty:
         return None
     return filtered['disease'].iloc[0]
 
-# Get medicine recommendations for a given disease
 def get_medicines_for_disease(disease, df):
     if df.empty: return None
     filtered = df[df['disease'].str.lower() == str(disease).lower()]
@@ -99,40 +123,72 @@ def get_medicines_for_disease(disease, df):
         return None
     return filtered[['medicine', 'dose', 'time']]
 
-# File uploader to accept prescription image
-uploaded_file = st.file_uploader("Upload Handwritten Prescription Image", type=["png", "jpg", "jpeg"])
+# --- MAIN UI LAYOUT ---
 
-# Main logic after file is uploaded
+# Sidebar
+with st.sidebar:
+    st.header("Upload Prescription")
+    uploaded_file = st.file_uploader("Choose an image...", type=["png", "jpg", "jpeg"])
+    
+    st.markdown("---")
+    st.info("Tip: Ensure the handwriting is legible and the lighting is good for best results.")
+
+# Main Content
+st.title("Smart Prescription Digitizer")
+st.markdown("### Translate handwritten medical notes into digital records")
+
 if uploaded_file:
-    # Convert uploaded image to OpenCV format
+    # 1. Read Image
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     image = cv2.imdecode(file_bytes, 1)
 
-    # Display uploaded image
-    st.image(image, caption="Uploaded Prescription", use_column_width=True)
+    # Layout: Two columns (Image | Results)
+    col1, col2 = st.columns([1, 1.5], gap="large")
 
-    # OCR: Extract text from the prescription image
-    st.subheader("Extracted Text")
-    extracted_text = extract_text_from_image(image)
-    st.text_area("Detected Text", extracted_text, height=150)
+    with col1:
+        st.subheader("Original Image")
+        st.image(image, caption="Uploaded Scan", use_column_width=True)
+        
+        with st.expander("Show OCR Processed Image"):
+            st.image(preprocess_image_for_ocr(image), caption="Enhanced for OCR", use_column_width=True)
 
-    # Predict disease or medicine from the image
-    st.subheader("Prediction Result")
-    prediction = predict_disease(image)
+    with col2:
+        st.subheader("Analysis Results")
+        
+        # 2. Extract Text (Spinner for UX)
+        with st.spinner("Reading handwriting..."):
+            extracted_text = extract_text_from_image(image)
+        
+        st.text_area("Extracted Text (OCR)", extracted_text, height=100)
 
-    # Check if prediction is a medicine and map it back to disease
-    actual_disease = reverse_medicine_to_disease(prediction, disease_data)
-    if actual_disease:
-        disease = actual_disease
-        st.info(f"Detected as medicine: '{prediction}' → Associated disease: '{disease}'")
-    else:
-        disease = prediction
-        st.success(f"Predicted Disease: {disease}")
+        # 3. Predict Disease
+        with st.spinner("Analyzing medical data..."):
+            prediction = predict_disease(image)
+            
+            # Logic to handle Medicine vs Disease prediction
+            actual_disease = reverse_medicine_to_disease(prediction, disease_data)
+            
+            if actual_disease:
+                final_disease = actual_disease
+                st.info(f"The AI detected a medicine name: '{prediction}'\n\nThis is typically used for: {final_disease.title()}")
+            else:
+                final_disease = prediction
+                st.success(f"Predicted Condition: {final_disease.title()}")
 
-    # Show medicines for the identified disease
-    st.subheader("Suggested Medicines")
-    meds = get_medicines_for_disease(disease, disease_data)
-    if meds is not None:
-        st.dataframe(meds)
-    else:
-        st.warning("No medicines found for the predicted disease.")
+        # 4. Show Recommendations
+        st.markdown("#### Recommended Medication Schedule")
+        meds = get_medicines_for_disease(final_disease, disease_data)
+        
+        if meds is not None:
+            st.dataframe(meds, use_container_width=True, hide_index=True)
+        else:
+            st.warning(f"No specific medication data found for {final_disease}.")
+
+else:
+    # Empty State
+    st.markdown("""
+    <div style="text-align: center; color: gray; padding: 50px;">
+        <h3>Upload a prescription image to get started</h3>
+        <p>This AI uses Deep Learning and Tesseract OCR to interpret medical handwriting.</p>
+    </div>
+    """, unsafe_allow_html=True)
