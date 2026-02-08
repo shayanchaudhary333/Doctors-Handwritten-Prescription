@@ -11,7 +11,7 @@ from tensorflow.keras.models import load_model
 # On the Cloud (Linux), we don't need to set the path manually if installed via packages.txt
 # We only set it if we are on Windows (local laptop)
 if os.name == 'nt':
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+  #  pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # Title of the app
 st.title("Handwritten Prescription to Structured Medicine List")
