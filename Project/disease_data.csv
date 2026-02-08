@@ -1,0 +1,17 @@
+disease,medicine,dose,time
+fever,Paracetamol,1 tablet,morning & night
+fever,Ibuprofen,200 mg,after meal twice daily
+fever,Aspirin,75 mg,once daily after breakfast
+cough,Ambroxol Syrup,10 ml,thrice a day
+cough,Dextromethorphan,5 ml,at night before sleep
+cough,Bromhexine,5 mg,once daily at night
+headache,Sumatriptan,50 mg,take at onset of headache
+migraine,Propranolol,20 mg,twice daily after food
+migraine,Flunarizine,5 mg,half hour before food
+migraine,Topiramate,25 mg,once at night
+migraine,Naproxen,250 mg,as needed for pain
+infection,Amoxicillin,500 mg,every 8 hours
+infection,Azithromycin,500 mg,once daily for 3 days
+infection,Cefixime,200 mg,twice daily after meals
+stomach pain,Omeprazole,20 mg,before breakfast daily
+stomach pain,Domperidone,10 mg,twice daily before food
